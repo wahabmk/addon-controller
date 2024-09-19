@@ -1131,6 +1131,8 @@ func getRegistryClient(namespace string, registryOptions *registryClientOptions,
 		if registryOptions.plainHTTP {
 			options = append(options, registry.ClientOptPlainHTTP())
 		}
+
+		fmt.Printf("\n\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> [getRegistryClient] registryOptions.plainHTTP=%v, len(options)=%d\n", registryOptions.plainHTTP, len(options))
 		return registry.NewClient(options...)
 	}
 
@@ -2086,6 +2088,9 @@ func getHelmInstallClient(requestedChart *configv1beta1.HelmChart, kubeconfig st
 		installClient.PostRenderer = &patcher.CustomPatchPostRenderer{Patches: patches}
 	}
 
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> [getHelmInstallClient] installClient.PlainHTTP=%v, installClient.ChartPathOptions.PlainHTTP=%v\n\n", installClient.PlainHTTP, installClient.ChartPathOptions.PlainHTTP)
+	// installClient.ChartPathOptions.PlainHTTP = true // forcefully setting it to true
+	// installClient.PlainHTTP
 	return installClient, nil
 }
 
