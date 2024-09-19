@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -528,6 +529,7 @@ func walkChartsAndDeploy(ctx context.Context, c client.Client, clusterSummary *c
 
 		var report *configv1beta1.ReleaseReport
 		var currentRelease *releaseInfo
+		// WAHAB: Root of installing helm chart through ClusterProfile
 		currentRelease, report, err = handleChart(ctx, clusterSummary, mgmtResources, currentChart, kubeconfig, logger)
 		if err != nil {
 			return releaseReports, chartDeployed, err
@@ -743,6 +745,7 @@ func handleUninstall(clusterSummary *configv1beta1.ClusterSummary, currentChart 
 	return report, nil
 }
 
+// WAHAB: start here to drill down on installing helm chart
 func handleChart(ctx context.Context, clusterSummary *configv1beta1.ClusterSummary,
 	mgmtResources map[string]*unstructured.Unstructured, currentChart *configv1beta1.HelmChart,
 	kubeconfig string, logger logr.Logger) (*releaseInfo, *configv1beta1.ReleaseReport, error) {
@@ -860,6 +863,7 @@ func repoAddOrUpdate(settings *cli.EnvSettings, name, repoURL string, logger log
 		return nil
 	}
 
+	// // // // fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> IsOCI = %v\n", registry.IsOCI(entry.URL))
 	if !registry.IsOCI(entry.URL) {
 		_, err = chartRepo.DownloadIndexFile()
 		if err != nil {
@@ -878,6 +882,7 @@ func repoAddOrUpdate(settings *cli.EnvSettings, name, repoURL string, logger log
 	return nil
 }
 
+// WAHAB: meat
 // installRelease installs helm release in the CAPI cluster.
 // No action in DryRun mode.
 func installRelease(ctx context.Context, clusterSummary *configv1beta1.ClusterSummary, settings *cli.EnvSettings,
@@ -896,10 +901,16 @@ func installRelease(ctx context.Context, clusterSummary *configv1beta1.ClusterSu
 	logger = logger.WithValues("release", requestedChart.ReleaseName, "releaseNamespace",
 		requestedChart.ReleaseNamespace, "chart", requestedChart.ChartName, "chartVersion", requestedChart.ChartVersion)
 
+	// WAHAB: I think this getHelmChartAndRepoName is what is causing the invalid_reference issue
 	chartName, repoURL, err := getHelmChartAndRepoName(requestedChart.ChartName, requestedChart.RepositoryURL)
 	if err != nil {
 		return err
 	}
+
+	// // // // fmt.Printf("\n\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> requestedChart.Name=%s, newChartName=%s    requestedChart.RepositoryURL=%s, newRepoURL=%s\n", requestedChart.ChartName, chartName, requestedChart.RepositoryURL, repoURL)
+	// // // // b, _ := json.Marshal(registryOptions)
+	// // // // fmt.Printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> registryOptions = %s\n\n", string(b))
+
 	logger = logger.WithValues("repositoryURL", repoURL, "chart", chartName)
 	logger = logger.WithValues("credentials", registryOptions.credentialsPath, "ca",
 		registryOptions.caPath, "insecure", registryOptions.skipTLSVerify)
@@ -916,7 +927,9 @@ func installRelease(ctx context.Context, clusterSummary *configv1beta1.ClusterSu
 		return err
 	}
 
+	// // // // b, _ = json.MarshalIndent(settings, "", "  ")
 	cp, err := installClient.ChartPathOptions.LocateChart(chartName, settings)
+	// // // // fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> [LocateChart] err=%s, settings = %s\n", err, string(b))
 	if err != nil {
 		logger.V(logs.LogDebug).Info("LocateChart failed")
 		return err
@@ -1119,6 +1132,7 @@ func getRegistryClient(namespace string, registryOptions *registryClientOptions,
 ) (*registry.Client, error) {
 
 	settings := getSettings(namespace, registryOptions)
+	// // // // fmt.Printf("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ [getRegistryClient]: registryOptions.caPath=%s, registryOptions.skipTLSVerify=%v\n", registryOptions.caPath, registryOptions.skipTLSVerify)
 	if registryOptions.caPath == "" && !registryOptions.skipTLSVerify {
 		options := []registry.ClientOption{
 			registry.ClientOptDebug(settings.Debug),
@@ -1132,8 +1146,21 @@ func getRegistryClient(namespace string, registryOptions *registryClientOptions,
 			options = append(options, registry.ClientOptPlainHTTP())
 		}
 		return registry.NewClient(options...)
+
+		// // // // b, _ := json.MarshalIndent(options, "", "  ")
+		// // // // fmt.Printf("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ [getRegistryClient] Return with insecure (ORIGINAL): registryOptions.plainHTTP=%v, options=%s\n", registryOptions.plainHTTP, string(b))
+
+		// // // // // Manually enabling plainHTTP
+		// // // // registryOptions.plainHTTP = true
+		// // // // options = append(options, registry.ClientOptPlainHTTP())
+
+		// // // // rr, err := registry.NewClient(options...)
+
+		// // // // fmt.Printf("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ [getRegistryClient] Return with insecure (AFTER MANUAL CHANGES): err=%s, registryOptions.plainHTTP=%v, options=%s\n", err, registryOptions.plainHTTP, string(b))
+		// // // // return rr, err
 	}
 
+	// // // // fmt.Printf("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ [getRegistryClient] Return with TLS\n")
 	return registry.NewRegistryClientWithTLS(os.Stderr, "", "", registryOptions.caPath,
 		registryOptions.skipTLSVerify, registryOptions.credentialsPath, settings.Debug)
 }
@@ -2085,6 +2112,19 @@ func getHelmInstallClient(requestedChart *configv1beta1.HelmChart, kubeconfig st
 	if len(patches) > 0 {
 		installClient.PostRenderer = &patcher.CustomPatchPostRenderer{Patches: patches}
 	}
+
+	// It seems like instead of setting plainHTTP on actionConfig.RegistryClient,
+	// we need to set it on installClient instead.
+	// Confirm if this is the case in Helm CLI code.
+	fmt.Printf("\n\n############################################### getHelmInstallClient ###############################################\n")
+	b, err := json.MarshalIndent(installClient.ChartPathOptions, "", "  ")
+	fmt.Printf("[ORIGINAL] registryOptions.plainHTTP=%v, registryOptions.skipTLSVerify=%v, installClient.ChartPathOptions.PlainHTTP=%v, err=%s, installClient.ChartPathOptions=%s\n", registryOptions.plainHTTP, registryOptions.skipTLSVerify, installClient.ChartPathOptions.PlainHTTP, err, string(b))
+
+	installClient.ChartPathOptions.PlainHTTP = true // forcefully setting it to true
+	b, err = json.MarshalIndent(installClient.ChartPathOptions, "", "  ")
+	fmt.Printf("[AFTER] installClient.ChartPathOptions.PlainHTTP=%v, err=%s, installClient.ChartPathOptions = %s\n", installClient.ChartPathOptions.PlainHTTP, err, string(b))
+
+	fmt.Printf("####################################################################################################################\n\n")
 
 	return installClient, nil
 }
