@@ -392,8 +392,7 @@ docker-push: ## Push docker image with the manager.
 
 .PHONY: docker-buildx
 docker-buildx: ## docker build for multiple arch and push to docker hub
-	docker buildx build --push --platform linux/amd64,linux/arm64 -t $(CONTROLLER_IMG):$(TAG) .
-	docker buildx build --push --platform linux/amd64,linux/arm64 -t $(CONTROLLER_IMG)-git:$(TAG) -f Dockerfile_WithGit .
+	docker buildx build --push --platform linux/amd64 -t msr.ci.mirantis.com/projectsveltos/addon-controller:6e25e99 .
 
 .PHONY: load-image
 load-image: docker-build $(KIND)

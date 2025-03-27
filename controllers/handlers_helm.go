@@ -837,6 +837,9 @@ func createRegistryClientOptions(ctx context.Context, clusterSummary *configv1be
 
 	registryOptions.credentialsPath = credentialsPath
 	registryOptions.caPath = caPath
+	registryOptions.plainHTTP = getPlainHTTP(currentChart)
+	registryOptions.skipTLSVerify = getInsecureSkipTLSVerify(currentChart)
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>> createRegistryClientOptions: registryOptions.plainHTTP = %v\n", registryOptions.plainHTTP)
 
 	if currentChart.RegistryCredentialsConfig.CredentialsSecretRef != nil {
 		credentialSecretNamespace := libsveltostemplate.GetReferenceResourceNamespace(clusterSummary.Spec.ClusterNamespace,
@@ -862,8 +865,12 @@ func createRegistryClientOptions(ctx context.Context, clusterSummary *configv1be
 		registryOptions.password = password
 		registryOptions.hostname = hostname
 
-		registryOptions.plainHTTP = getPlainHTTP(currentChart)
-		registryOptions.skipTLSVerify = getInsecureSkipTLSVerify(currentChart)
+		// // wahab: I bet function is returning before plainHTTP being set here.
+		// // Actually this within an if condition that I think isn't true because
+		// // we don't set CredentialsSecretRef for the default HelmRepository in k0rdent.
+		// // So move these out of the if condition and try it out.
+		// registryOptions.plainHTTP = getPlainHTTP(currentChart)
+		// registryOptions.skipTLSVerify = getInsecureSkipTLSVerify(currentChart)
 	}
 
 	return registryOptions, nil
@@ -1021,7 +1028,9 @@ func installRelease(ctx context.Context, clusterSummary *configv1beta1.ClusterSu
 	logger = logger.WithValues("repositoryURL", repoURL, "chart", chartName)
 	logger = logger.WithValues("credentials", registryOptions.credentialsPath, "ca",
 		registryOptions.caPath, "insecure", registryOptions.skipTLSVerify)
+	logger = logger.WithValues("plainHTTP", registryOptions.plainHTTP)
 	logger.V(logs.LogDebug).Info("installing release")
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>> installRelease: registryOptions.plainHTTP = %v\n", registryOptions.plainHTTP)
 
 	patches, err := initiatePatches(ctx, clusterSummary, requestedChart.ChartName, mgmtResources, logger)
 	if err != nil {
@@ -1348,7 +1357,7 @@ func debugf(format string, v ...interface{}) {
 
 func getRegistryClient(namespace string, registryOptions *registryClientOptions, enableClientCache bool,
 ) (*registry.Client, error) {
-
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>> getRegistryClient: registryOptions.caPath=%s, registryOptions.skipTLSVerify=%v\n", registryOptions.caPath, registryOptions.skipTLSVerify)
 	settings := getSettings(namespace, registryOptions)
 
 	if registryOptions.caPath != "" || registryOptions.skipTLSVerify {
@@ -1360,6 +1369,7 @@ func getRegistryClient(namespace string, registryOptions *registryClientOptions,
 		return registryClient, nil
 	}
 
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>> getRegistryClient: registryOptions.plainHTTP=%v\n", registryOptions.plainHTTP)
 	registryClient, err := newDefaultRegistryClient(registryOptions.plainHTTP, settings, enableClientCache)
 	if err != nil {
 		return nil, err
@@ -2427,6 +2437,7 @@ func getHelmInstallClient(requestedChart *configv1beta1.HelmChart, kubeconfig st
 	installClient.Replace = getReplaceValue(requestedChart.Options)
 	installClient.Labels = getLabelsValue(requestedChart.Options)
 	installClient.Description = getDescriptionValue(requestedChart.Options)
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>> getHelmUpgradeClient: ISNIL(actionConfig.RegistryClient) = %v\n", actionConfig.RegistryClient == nil)
 	if actionConfig.RegistryClient != nil {
 		installClient.SetRegistryClient(actionConfig.RegistryClient)
 	}
@@ -2850,7 +2861,10 @@ func doLogin(registryOptions *registryClientOptions, releaseNamespace, registryU
 			action.WithCertFile(""),
 			action.WithKeyFile(""),
 			action.WithCAFile(registryOptions.caPath),
-			action.WithInsecure(registryOptions.skipTLSVerify))
+			action.WithInsecure(registryOptions.skipTLSVerify),
+			// action.WithPlainHTTPLogin(registryOptions.plainHTTP), // wahab: this function maybe exists in newer helm version
+			// see: https://github.com/helm/helm/pull/13382/files
+		)
 	}
 
 	return nil
